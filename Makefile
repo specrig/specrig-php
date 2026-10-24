@@ -40,7 +40,8 @@ test-docker: install-docker
 		&& (cd samples/reminders && vendor/bin/behat -c tests/behat.php)'
 
 protocol:
-	mkdir -p tests/fixtures/protocol/agents tests/fixtures/protocol/markers
+	rm -rf packages/specrig/protocol tests/fixtures/protocol
+	mkdir -p packages/specrig/protocol/agents tests/fixtures/protocol/records tests/fixtures/protocol/agents tests/fixtures/protocol/markers
 	cp $(PROTOCOL)/modes.yaml packages/specrig/protocol/
 	cp $(PROTOCOL)/agents/*.md packages/specrig/protocol/agents/
 	cp $(PROTOCOL)/fixtures/records/* tests/fixtures/protocol/records/
