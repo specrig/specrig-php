@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, sockets, zip
+          coverage: none
+      - run: make generate
+      - run: make test
+      - name: the records are the code's
+        run: git diff --exit-code
+
+  split:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { package: specrig, mirror: specrig-php-core }
+          - { package: laravel, mirror: specrig-php-laravel }
+          - { package: symfony, mirror: specrig-php-symfony }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          # Persisted, the checkout's GITHUB_TOKEN would reach the mirror in place of SPLIT_TOKEN.
+          persist-credentials: false
+      - name: packages/${{ matrix.package }} to specrig/${{ matrix.mirror }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+          MIRROR: ${{ matrix.mirror }}
+          SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+        run: |
+          split=$(git subtree split --prefix "packages/$PACKAGE" HEAD)
+          git push "https://x-access-token:$SPLIT_TOKEN@github.com/specrig/$MIRROR.git" "$split:$GITHUB_REF"

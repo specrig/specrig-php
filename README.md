@@ -620,3 +620,41 @@ make protocol
 
 refreshes the copies of the protocol from a checkout of it beside this one,
 `PROTOCOL` to name another; the tests then run against the new copy.
+
+## Releasing
+
+The packages are developed here and published from a read-only mirror each, since
+Packagist takes a package from the root of a repository:
+
+| package | from | mirror |
+|---|---|---|
+| `specrig/specrig` | `packages/specrig` | `specrig/specrig-php-core` |
+| `specrig/laravel` | `packages/laravel` | `specrig/specrig-php-laravel` |
+| `specrig/symfony` | `packages/symfony` | `specrig/specrig-php-symfony` |
+
+On every push to `main` and every tag `v*`, `.github/workflows/release.yml` runs
+`make generate` and `make test`, fails when they leave a diff, and then pushes each
+package's history, split out with `git subtree split`, to its mirror: `main` to its
+`main`, a tag to the same tag. A version is one tag here:
+
+```bash
+git tag v0.1.0
+```
+
+```bash
+git push origin v0.1.0
+```
+
+All three mirrors get it, and they move together: an adapter requires the core of
+its own version, `self.version`. An adapter's archive leaves out its `tests/` and
+`phpunit.xml`, which run only against the samples here. Issues and changes come
+here; a mirror takes only the workflow's pushes, and a commit made in one stops
+the next push to it.
+
+Once, before the first push that is to reach the mirrors:
+
+1. the three mirrors, created empty on GitHub;
+2. a fine-grained token with read and write access to the contents of the three,
+   saved in this repository as the secret `SPLIT_TOKEN`;
+3. after the first run, each mirror submitted to Packagist, with its update hook,
+   so a push to the mirror reaches Packagist.
