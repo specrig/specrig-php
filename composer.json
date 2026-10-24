@@ -1,0 +1,36 @@
+{
+    "name": "specrig/specrig-php",
+    "description": "The development workspace of specrig's PHP packages",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/*",
+            "options": {
+                "symlink": true,
+                "versions": {
+                    "specrig/specrig": "0.1.0",
+                    "specrig/laravel": "0.1.0",
+                    "specrig/symfony": "0.1.0"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "specrig/specrig": "0.1.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Specrig\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}

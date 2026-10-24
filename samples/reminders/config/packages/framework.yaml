@@ -1,0 +1,14 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    http_client:
+        scoped_clients:
+            billing.client:
+                base_uri: '%env(BILLING_URL)%'
+                headers:
+                    Accept: application/json
+                timeout: 5
+    messenger:
+        transports:
+            async: '%env(MESSENGER_TRANSPORT_DSN)%'
+        routing:
+            App\Message\Remind: async

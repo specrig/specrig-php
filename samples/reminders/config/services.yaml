@@ -1,0 +1,19 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+            - '../src/Entity/'
+            - '../src/Message/'
+
+    Predis\Client:
+        arguments: ['%env(REDIS_URL)%']
+
+    PhpAmqpLib\Connection\AbstractConnection:
+        class: PhpAmqpLib\Connection\AMQPStreamConnection
+        factory: ['App\Rabbit', 'connect']
+        arguments: ['%env(RABBIT_URL)%']

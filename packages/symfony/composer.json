@@ -1,0 +1,18 @@
+{
+    "name": "specrig/symfony",
+    "description": "specrig for a Symfony service: the kernel booted per case, its HTTP client, transports and console stood in for",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "specrig/specrig": "self.version",
+        "symfony/dotenv": "^7.4 || ^8.0",
+        "symfony/framework-bundle": "^7.4 || ^8.0",
+        "symfony/http-client": "^7.4 || ^8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Specrig\\Symfony\\": "src/"
+        }
+    }
+}

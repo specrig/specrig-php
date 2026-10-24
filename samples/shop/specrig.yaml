@@ -1,0 +1,4 @@
+guard: [php, vendor/bin/specrig]
+flows:
+  clients:
+    App\Billing: billing

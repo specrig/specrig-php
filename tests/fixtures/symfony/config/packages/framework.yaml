@@ -1,0 +1,10 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    http_client:
+        scoped_clients:
+            warehouse.client:
+                base_uri: '%env(WAREHOUSE_URL)%'
+
+parameters:
+    feature: '%env(default::FEATURE_FLAG)%'
+    database: '%env(resolve:DATABASE_URL)%'

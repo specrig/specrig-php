@@ -1,0 +1,70 @@
+# Generated from the component suite by specrig: every whole run rewrites the
+# structure; only the description fields are yours.
+specrig: flows/1
+service: reminders
+inputs:
+  - message: command Remind
+    branches:
+      - sends:
+          - http POST /reminders
+          - event reminders.sent
+        sent:
+          event reminders.sent:
+            - amount
+            - order
+          http POST /reminders:
+            - amount
+            - order
+        cases:
+          - "reminders.feature: A customer whose invoice is overdue is reminded"
+          - "reminders.feature: The reminders are run by hand"
+          - "reminders.feature: The scheduler reminds as many customers a run as it is set to"
+  - message: command RemindersDue
+    branches:
+      - sends:
+          - http GET /invoices
+        cases:
+          - "reminders.feature: The scheduler reminds as many customers a run as it is set to"
+  - message: command SendReminders
+    branches:
+      - sends:
+          - http GET /invoices
+        cases:
+          - "reminders.feature: A customer whose invoice is overdue is reminded"
+          - "reminders.feature: An invoice billing has reported paid is not reminded of while billing still lists it"
+          - "reminders.feature: An invoice not yet due is not reminded of"
+  - message: command app:remind
+    branches:
+      - sends:
+          - http GET /invoices
+        cases:
+          - "reminders.feature: The reminders are run by hand"
+  - message: event invoices.paid
+    fields:
+      - order
+    branches:
+      - cases:
+          - "reminders.feature: A payment billing reports is acknowledged"
+      - refused: dropped
+        cases:
+          - "reminders.feature: A payment report the reminders cannot read is dropped"
+  - message: http GET /reminders/{order}
+    branches:
+      - cases:
+          - "history.feature: The last reminder of an order is shown"
+      - refused: HTTP 404 reminder_not_found
+        cases:
+          - "history.feature: An order never reminded of has no reminder"
+      - refused: HTTP 503 database_unavailable
+        cases:
+          - "history.feature: The reminders are told to come back while their database is down"
+outputs:
+  - message: event reminders.sent
+    fields:
+      - amount
+      - order
+  - message: http GET /invoices
+  - message: http POST /reminders
+    fields:
+      - amount
+      - order

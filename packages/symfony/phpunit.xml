@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Runs against the reminders sample's kernel, with its vendor: make test runs it so. -->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="../../samples/reminders/vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="../../samples/reminders/vendor/autoload.php"
+         colors="true"
+         failOnWarning="true">
+    <testsuites>
+        <testsuite name="symfony">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
