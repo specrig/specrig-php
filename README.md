@@ -126,7 +126,10 @@ lacks. It writes:
 
 and `tests/surface.yaml` and `tests/checks.yaml`, and adds `behat/behat`,
 `webmozart/assert` and the harness to `require-dev` — `composer update` with
-them is the one step left, and `init` prints it.
+them is the one step left, and `init` prints it. It maps the tests' namespace
+`Internal\` and `Steps\` to `tests/internal/` and `tests/steps/` in
+`autoload-dev`: PSR-4 alone would look for `tests/Internal/` and `tests/Steps/`,
+which on Linux are other directories.
 
 Then:
 

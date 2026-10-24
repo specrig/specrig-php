@@ -47,7 +47,9 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "App\\Tests\\": "tests/"
+            "App\\Tests\\": "tests/",
+            "App\\Tests\\Internal\\": "tests/internal/",
+            "App\\Tests\\Steps\\": "tests/steps/"
         }
     },
     "config": {

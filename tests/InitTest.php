@@ -45,7 +45,19 @@ final class InitTest extends TestCase
         $this->assertStringContainsString('"specrig/laravel":', (string) file_get_contents("{$dir}/composer.json"));
     }
 
-    private const REFERENCE = "Read @specrig.md before the first edit: Rule #11, and how this service's suite runs.";
+    public function testInitMapsTheHarnessAndTheStepsToTheirLowercaseDirectories(): void
+    {
+        $dir = $this->copy('laravel');
+
+        Init::run([$dir, '--backend', 'crm=CRM_URL'], '/');
+
+        $this->assertSame(
+            ['Tests\\' => 'tests/', 'Tests\\Internal\\' => 'tests/internal/', 'Tests\\Steps\\' => 'tests/steps/'],
+            json_decode((string) file_get_contents("{$dir}/composer.json"), true)['autoload-dev']['psr-4'],
+        );
+    }
+
+    private const REFERENCE ="Read @specrig.md before the first edit: Rule #11, and how this service's suite runs.";
 
     public function testInitWritesAnAgentsMdOfTheServicesOwnThatBringsSpecrigMdIn(): void
     {
