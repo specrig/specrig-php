@@ -571,8 +571,8 @@ once.
   service builds itself reads the proxy from the environment — curl, Guzzle and
   Symfony's clients do — and is refused, the case failing on it; PHP's own
   `http://` stream wrapper reads no proxy, so a `file_get_contents` of a URL is not
-  caught at all. Symfony's curl client turns the refusal into a 502 answer rather
-  than an exception.
+  caught at all. An `https://` request meets the refusal as a 502 answer or as a
+  transport error, as the libcurl under it decides.
 - No gRPC either way: a PHP service serves gRPC only under RoadRunner.
 - The database is one URL in one variable: Laravel's `DB_URL`, Symfony's
   `DATABASE_URL`. A connection configured host by host is not pointed anywhere.

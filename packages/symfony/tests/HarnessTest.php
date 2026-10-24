@@ -17,6 +17,7 @@ use Specrig\Redis;
 use Specrig\Rig;
 use Specrig\Symfony\Harness;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
 
 final class Reminders extends Harness
 {
@@ -107,9 +108,12 @@ final class HarnessTest extends TestCase
     {
         $this->reminders->boot();
 
-        $refused = HttpClient::create()->request('GET', 'https://maps.example.com/tiles/1', ['timeout' => 5]);
+        try {
+            HttpClient::create()->request('GET', 'https://maps.example.com/tiles/1', ['timeout' => 5])->getContent();
+            $this->fail('the request went past the stand-ins');
+        } catch (ExceptionInterface) {
+        }
 
-        $this->assertSame(502, $refused->getStatusCode());
         $this->assertSame(['requests to an origin Reminders does not name: https://maps.example.com, past the stand-ins'], $this->reminders->failures());
     }
 
