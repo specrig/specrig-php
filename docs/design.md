@@ -58,7 +58,7 @@ everything the request made it do. Three things follow.
 
 ## The format is not PHP's to change
 
-`waffle flows` joins services by the names in their records. The PHP writer
+A flow map joins services by the names in their records. The PHP writer
 writes them as the protocol's `records.md` says, and runs the protocol's record
 fixtures, copied into `tests/fixtures/protocol/records/`, in `FormatTest`.
 
