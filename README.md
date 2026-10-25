@@ -41,8 +41,10 @@ text of `specrig.md` — is the
   variable that neither the harness nor the service's shipped defaults answer.
 - **Two records in specrig's format.** `tests/surface.yaml` is what the code can
   serve, consume, publish and call, read from the code. `tests/flows.yaml` is
-  what the cases make the service send, step by step. A project's flow map reads
-  them beside its other services' records — specrig-go's `flows` does.
+  what the cases make the service send, step by step. `specrig-flows` reads them
+  beside the project's other services' records as one system: one binary for
+  every stack, from [specrig-go's releases](https://github.com/specrig/specrig-go#a-projects-flows),
+  with no Go needed.
 - **A protocol for the people and agents who write the cases.** `init` writes
   `specrig.md`, which holds an agent to the order: cases, approval, then code, and
   one line in the service's `AGENTS.md` brings it in; `specrig agents` rewrites it.
@@ -449,8 +451,8 @@ is called in a `Given`, before a step reaches the service.
 ## The records
 
 Both are specrig's format and say so first — `specrig: surface/1`,
-`specrig: flows/1` — so that a project's flow map finds the service by them and
-reads them beside the others; the protocol's `records.md` is what every writer
+`specrig: flows/1` — so that `specrig-flows` finds the service by them and reads
+them beside the others; the protocol's `records.md` is what every writer
 agrees on, and its fixtures run here in `FormatTest`. Each is rewritten by what
 has its source, and nothing compares it on the way: a project that rewrites them in
 CI and then runs `git diff --exit-code` sees a record that fell behind as a diff.
