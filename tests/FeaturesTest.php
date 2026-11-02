@@ -41,7 +41,7 @@ final class FeaturesTest extends TestCase
             GHERKIN);
 
         $this->assertSame(
-            ['orders/pay.feature: The customer pays', 'orders/pay.feature: The customer pays in <currency>'],
+            ['orders/pay.feature: The customer pays', 'orders/pay.feature: The customer pays in EUR'],
             array_map(fn (Scenario $c) => $c->label(), $features->cases()),
         );
     }
@@ -60,5 +60,37 @@ final class FeaturesTest extends TestCase
             GHERKIN);
 
         $this->assertSame([['Skipped', true], ['Run', false]], array_map(fn (Scenario $c) => [$c->title, $c->ignored], $features->cases()));
+    }
+
+    public function testAnOutlineIsACaseForEachRowOfItsExamples(): void
+    {
+        $features = $this->write('a.feature', <<<'GHERKIN'
+            Feature: A
+
+              Scenario Outline: Paying in <currency>
+                When the customer pays in <currency>
+
+                Examples:
+                  | currency   |
+                  | EUR        |
+                  | EUR \| USD |
+
+                @ignore
+                Examples:
+                  | currency |
+                  | USD      |
+
+              Rule: Refunds
+
+                Background:
+                  Given a paid order
+                    | currency |
+                    | GBP      |
+            GHERKIN);
+
+        $this->assertSame(
+            [['Paying in EUR', false], ['Paying in EUR | USD', false], ['Paying in USD', true]],
+            array_map(fn (Scenario $c) => [$c->title, $c->ignored], $features->cases()),
+        );
     }
 }
