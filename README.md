@@ -275,7 +275,8 @@ The service boots at the first step that reaches it, so a `Given` declares and
 replaces before anything is built. Each case boots a service of its own: a
 singleton holding state does not carry it into the next case, and the static
 state Laravel's own `TestCase` flushes is flushed too. The resources are
-provisioned once per run and emptied before every case.
+provisioned once per run and put back before every case: Postgres to what the
+migrations left, Redis empty.
 
 A call no step answered gets a 501 and fails the case, named. After the case,
 every request and every answer is checked against the neighbour's contract: an
@@ -413,7 +414,7 @@ database is welcome where the service's settings are not.
 ## Postgres
 
 ```php
-public readonly Postgres $database = new Postgres('DATABASE_URL', keep: ['currencies']),
+public readonly Postgres $database = new Postgres('DATABASE_URL'),
 ```
 
 The variable receives one URL — Laravel's `DB_URL`, Symfony's `DATABASE_URL` —
@@ -427,8 +428,16 @@ ago, with nobody connected.
 
 The schema is the service's own, built at the first boot of the run: Laravel's
 `migrate --force`; Symfony's `doctrine:migrations:migrate`, or the schema from its
-mapping where it has no migrations. Before every case every table is truncated but
-the migrations' own and those `keep:` names.
+mapping where it has no migrations. Then the rows the migrations wrote — a Laravel
+migration's `DB::table()->insert()`, a Doctrine migration's `INSERT` — are copied
+into a `specrig_baseline` schema, and where each sequence stood is remembered.
+Before every case the database goes back to what the migrations left: every table
+is truncated but the migrations' own and those `keep:` names, and the copied rows
+are written back — a row a migration wrote is there in every case, a case's own is
+gone, and ids go on after the seeded ones. Writing the rows back turns foreign keys
+and triggers off for one transaction, which needs a superuser: the container's role
+is one, and migrations that write no rows need none. A row a migration writes needs
+no `keep:`; a kept table is one no case resets.
 
 `$harness->database->failWith()` points the service's connection at a port where
 nothing listens: what connects is refused, as by a database that is down, and the

@@ -50,7 +50,7 @@ everything the request made it do. Three things follow.
 | clock | `Carbon::setTestNow`, from the step that sets it | the `clock` service and `Clock::set`, and Carbon's where it is installed |
 | logs | `MessageLogged` | the `logger` service decorated |
 | grants | `replace(Type::class, $instance)`: `instance()` after the providers register | `replace(Type::class, $instance)`: every granted service decorated by one that hands out the replacement |
-| Postgres | `migrate --force` once per run; every table but `migrations` and `keep()` truncated before every case; a refusal by the connection's URL pointed at a closed port and the connection purged; another error by `beforeExecuting` | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` truncated before every case; a DBAL middleware refuses connecting, or fails every statement with the step's error |
+| Postgres | `migrate --force` once per run; every table but `migrations` and `keep()` put back before every case as the migrations left it; a refusal by the connection's URL pointed at a closed port and the connection purged; another error by `beforeExecuting` | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` put back before every case as the migrations left it; a DBAL middleware refuses connecting, or fails every statement with the step's error |
 | Redis | `FLUSHDB` before every case | the same |
 | steps | Behat: an extension hands every context the case's harness, marks Given, When and Then, fails a case on what the harness found, and writes `tests/flows.yaml` after a whole run | |
 | `tests/surface.yaml` | `nikic/php-parser` over `app/`, `routes/`, `config/` and `bootstrap/` | the same over `src/` and `config/`, routes from attributes and `config/routes` |
@@ -112,6 +112,13 @@ image for CI and machines without PHP; how a project runs it is the project's.
 reason .NET does: a singleton that keeps state is a leak between cases. Booting a
 Laravel application costs milliseconds; a Symfony kernel with a compiled
 container about as much, and the container is compiled once per run.
+
+**Back as the migrations left it, not empty.** A schema without the rows its
+migrations write — the states an order moves through, the root of a tree — exists
+in no environment; a step that writes them again is a second copy of the
+migration that drifts from the first, and a `keep()` for them carries one case's
+changes into the next. Writing them back turns foreign keys and triggers off for
+one transaction, which takes a superuser; migrations that write no rows need none.
 
 **A container of the run's own.** A Symfony container compiled without debug
 never checks its sources, so one kept between runs would serve yesterday's code.
