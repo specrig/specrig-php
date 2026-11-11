@@ -190,6 +190,11 @@ abstract class Harness extends Rig
         $this->faults[$address] = [$refusing ?? $was, $error ?? $failed];
     }
 
+    public function healed(string $address): void
+    {
+        unset($this->faults[$address]);
+    }
+
     /**
      * @param array<string, mixed> $params
      * @return array{?Address, ?\Throwable}

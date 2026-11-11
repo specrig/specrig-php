@@ -51,6 +51,115 @@ final class BackendTest extends TestCase
         $this->assertSame('lang', $this->get('https://shop.test/items/1?view=full&lang=en')['id']);
     }
 
+    public function testAReplyAddsItsHeadersToTheResponseAndAContentTypeOfItsOwnReplacesJson(): void
+    {
+        $this->shop->reply('GET', '/items/1', 200, ['id' => '1'], ['X-Page' => '2']);
+        $this->shop->reply('GET', '/items/2', 200, ['id' => '2'], ['content-type' => 'application/vnd.shop+json']);
+        $this->shop->reply('GET', '/items/3', 200, ['id' => '3']);
+
+        $first = $this->standIns->send(new Request('GET', 'https://shop.test/items/1'));
+        $second = $this->standIns->send(new Request('GET', 'https://shop.test/items/2'));
+        $third = $this->standIns->send(new Request('GET', 'https://shop.test/items/3'));
+
+        $this->assertSame(['2', 'application/json'], [$first->header('X-Page'), $first->header('Content-Type')]);
+        $this->assertSame(['application/vnd.shop+json', 1], [$second->header('Content-Type'), count($second->headers)]);
+        $this->assertSame(['application/json', 1], [$third->header('Content-Type'), count($third->headers)]);
+    }
+
+    public function testAReplyWithNoBodyKeepsItsHeaders(): void
+    {
+        $this->shop->reply('POST', '/items/new', 204, null, ['Location' => '/items/9']);
+
+        $answer = $this->standIns->send(new Request('POST', 'https://shop.test/items/new', [], Json::encode(['name' => 'box'])));
+
+        $this->assertSame([204, '/items/9', ''], [$answer->status, $answer->header('Location'), $answer->body]);
+        $this->assertNull($answer->header('Content-Type'));
+    }
+
+    public function testAReplyToAQueryAddsItsHeadersToo(): void
+    {
+        $this->shop->replyTo('GET', '/items/1', ['view' => 'full'], 200, ['id' => 'full'], ['X-View' => 'full']);
+        $this->shop->reply('GET', '/items/1', 200, ['id' => 'any']);
+
+        $this->assertSame('full', $this->standIns->send(new Request('GET', 'https://shop.test/items/1?view=full'))->header('X-View'));
+        $this->assertNull($this->standIns->send(new Request('GET', 'https://shop.test/items/1'))->header('X-View'));
+    }
+
+    public function testASegmentInBracesTakesAnySegmentAndOnlyOne(): void
+    {
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => 'any']);
+
+        $this->assertSame('any', $this->get('https://shop.test/items/7')['id']);
+        $this->assertSame('any', $this->get('https://shop.test/items/8')['id']);
+        $this->assertSame(501, $this->standIns->send(new Request('GET', 'https://shop.test/items/7/parts'))->status);
+        $this->assertSame(501, $this->standIns->send(new Request('GET', 'https://shop.test/items'))->status);
+        $this->assertSame(501, $this->standIns->send(new Request('POST', 'https://shop.test/items/7'))->status);
+    }
+
+    public function testTheExactPathBeatsATemplateWhicheverWasDeclaredFirst(): void
+    {
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => 'template']);
+        $this->shop->reply('GET', '/items/7', 200, ['id' => 'exact']);
+        $this->shop->reply('GET', '/items/{other}', 200, ['id' => 'other']);
+
+        $this->assertSame('exact', $this->get('https://shop.test/items/7')['id']);
+        $this->assertSame('template', $this->get('https://shop.test/items/8')['id']);
+    }
+
+    public function testOfTwoTemplatesTheFirstDeclaredWins(): void
+    {
+        $this->shop->reply('GET', '/{kind}/7', 200, ['id' => 'kind']);
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => 'item']);
+
+        $this->assertSame('kind', $this->get('https://shop.test/items/7')['id']);
+        $this->assertSame('item', $this->get('https://shop.test/items/8')['id']);
+    }
+
+    public function testATemplateKeepsTheRepliesToItsQueries(): void
+    {
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => 'any']);
+        $this->shop->replyTo('GET', '/items/{id}', ['view' => 'full'], 200, ['id' => 'full']);
+
+        $this->assertSame('full', $this->get('https://shop.test/items/7?view=full')['id']);
+        $this->assertSame('any', $this->get('https://shop.test/items/7')['id']);
+    }
+
+    public function testATemplateTakesATimeOut(): void
+    {
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => '1']);
+        $this->shop->timeOut('GET', '/items/{id}', ['view' => 'full']);
+
+        $this->assertSame('1', $this->get('https://shop.test/items/7')['id']);
+        $this->expectException(Unreachable::class);
+        $this->get('https://shop.test/items/7?view=full');
+    }
+
+    public function testRequestsAreReadBackByTheTemplateThatTakesThem(): void
+    {
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => '1']);
+        $this->get('https://shop.test/items/7');
+        $this->get('https://shop.test/items/8');
+        $this->standIns->send(new Request('GET', 'https://shop.test/items/new'));
+
+        $this->assertSame(['/items/7', '/items/8', '/items/new'], array_map(fn ($r) => $r->path, $this->shop->requests('GET', '/items/{id}')));
+        $this->assertSame(['/items/7'], array_map(fn ($r) => $r->path, $this->shop->requests('GET', '/items/7')));
+        $this->assertSame([], $this->shop->requests('POST', '/items/{id}'));
+    }
+
+    public function testTheContractCheckAndTheTraceNameARequestByItsRealPath(): void
+    {
+        $bare = new Backend('https://bare.test');
+        $bare->bind('bare', $this->trace, null);
+        $bare->reply('GET', '/items/{id}', 200, ['id' => '1']);
+        $this->shop->reply('GET', '/items/{id}', 200, ['id' => 7]);
+
+        (new StandIns([$bare]))->send(new Request('GET', 'https://bare.test/items/7'));
+        $this->get('https://shop.test/items/7');
+
+        $this->assertSame('GET /items/7', $this->trace->records()[0]->name);
+        $this->assertStringStartsWith('GET /items/7 answered 200: ', $this->shop->violations()[0] ?? '');
+    }
+
     public function testACallNoStepAnsweredGetsA501AndIsNamed(): void
     {
         $answer = $this->standIns->send(new Request('GET', 'https://shop.test/items/1?view=full'));

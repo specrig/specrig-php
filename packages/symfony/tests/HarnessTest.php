@@ -7,15 +7,22 @@ namespace Specrig\Symfony\Tests;
 use App\Billing;
 use App\Command\ConsumePaymentsCommand;
 use App\Entity\Reminder;
+use App\PaidOrders;
 use App\SendReminders;
+use Doctrine\DBAL\Exception\ConnectionException;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\TestCase;
+use Predis\Client;
+use Predis\PredisException;
 use Specrig\Amqp\Bus;
 use Specrig\Backend;
+use Specrig\Environment;
 use Specrig\Postgres;
 use Specrig\Redis;
 use Specrig\Rig;
 use Specrig\Symfony\Harness;
+use Specrig\Write;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
 
@@ -96,6 +103,15 @@ final class HarnessTest extends TestCase
         $this->assertSame(['billing was called where no step declared its answer: GET /invoices?status=unpaid'], $this->reminders->failures());
     }
 
+    public function testTheHeadersAStepGaveAReplyReachTheServicesClient(): void
+    {
+        $this->reminders->billing->replyTo('GET', '/invoices', ['status' => 'unpaid'], 200, [], ['X-Total' => '0']);
+
+        $response = $this->reminders->get('billing.client')->request('GET', '/invoices', ['query' => ['status' => 'unpaid']]);
+
+        $this->assertSame([['0'], []], [$response->getHeaders()['x-total'], $response->toArray()]);
+    }
+
     public function testARequestIsTracedByTheRouteItMatchedAndItsRefusal(): void
     {
         $this->reminders->http()->get('/reminders/8');
@@ -150,5 +166,89 @@ final class HarnessTest extends TestCase
 
         $this->expectExceptionMessage('the disk is full');
         $this->reminders->get(EntityManagerInterface::class)->getConnection()->executeQuery('SELECT 1');
+    }
+
+    public function testARedisThatFailsCutsTheClientsTheServiceBuiltAndRefusesNewOnesUntilTheNextCase(): void
+    {
+        $paid = $this->reminders->get(PaidOrders::class);
+        $paid->add(7);
+        $this->assertTrue($paid->has(7));
+
+        $this->reminders->cache->failWith();
+
+        foreach ([fn () => $paid->has(7), fn () => (new Client((string) Environment::get('REDIS_URL')))->ping()] as $call) {
+            try {
+                $call();
+                $this->fail('redis answered');
+            } catch (PredisException) {
+            }
+        }
+        $this->reminders->dispose();
+
+        $this->reminders = new Reminders();
+        $this->assertFalse($this->reminders->get(PaidOrders::class)->has(7));
+    }
+
+    public function testARedisThatFailsBeforeTheBootLetsTheServiceBootAndRefusesItAfterwards(): void
+    {
+        $this->reminders->cache->failWith();
+
+        $paid = $this->reminders->get(PaidOrders::class);
+
+        $this->expectException(PredisException::class);
+        $paid->has(7);
+    }
+
+    public function testADatabaseThatComesBackAnswersAgainWithTheRowsItHeld(): void
+    {
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $this->reminders->database->failWith();
+        try {
+            $connection->executeQuery('SELECT 1');
+            $this->fail('the database answered');
+        } catch (ConnectionException) {
+        }
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+    }
+
+    public function testADatabaseThatFailedWithAnErrorComesBackToo(): void
+    {
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $this->reminders->database->failWith(new \RuntimeException('the disk is full'));
+        try {
+            $connection->executeQuery('SELECT 1');
+            $this->fail('the database answered');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('the disk is full', $e->getMessage());
+        }
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+    }
+
+    public function testATableThatRefusesItsWritesRefusesTheServiceUntilTheDatabaseComesBack(): void
+    {
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $insert = "INSERT INTO reminders (order_id, amount, sent_at) VALUES (8, 80, '2026-11-10 12:00:00')";
+        $this->reminders->database->refuse('reminders', Write::Insert);
+
+        try {
+            $connection->executeStatement($insert);
+            $this->fail('the insert went through');
+        } catch (DriverException $e) {
+            $this->assertStringContainsString('specrig: insert on reminders is refused', $e->getMessage());
+        }
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->executeStatement($insert));
     }
 }

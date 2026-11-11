@@ -50,8 +50,9 @@ everything the request made it do. Three things follow.
 | clock | `Carbon::setTestNow`, from the step that sets it | the `clock` service and `Clock::set`, and Carbon's where it is installed |
 | logs | `MessageLogged` | the `logger` service decorated |
 | grants | `replace(Type::class, $instance)`: `instance()` after the providers register | `replace(Type::class, $instance)`: every granted service decorated by one that hands out the replacement |
-| Postgres | `migrate --force` once per run; every table but `migrations` and `keep()` put back before every case as the migrations left it; a refusal by the connection's URL pointed at a closed port and the connection purged; another error by `beforeExecuting` | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` put back before every case as the migrations left it; a DBAL middleware refuses connecting, or fails every statement with the step's error |
-| Redis | `FLUSHDB` before every case | the same |
+| Postgres | `migrate --force` once per run; every table but `migrations` and `keep()` put back before every case as the migrations left it; a refusal by the connection's URL pointed at a closed port and the connection purged; another error by `beforeExecuting`; `heal` points the URL back and purges | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` put back before every case as the migrations left it; a DBAL middleware refuses connecting, or fails every statement with the step's error; `heal` clears the middleware's fault |
+| a table's writes | triggers in Postgres itself, in a schema of their own, put there by `refuse`, `refuseAfter` and `refuseCommit`; dropped by `heal` and before every case | the same |
+| Redis | the address the service gets is a gate's, a process of the run's own that forwards; `failWith` closes it; `FLUSHDB` before every case | the same |
 | steps | Behat: an extension hands every context the case's harness, marks Given, When and Then, fails a case on what the harness found, and writes `tests/flows.yaml` after a whole run | |
 | `tests/surface.yaml` | `nikic/php-parser` over `app/`, `routes/`, `config/` and `bootstrap/` | the same over `src/` and `config/`, routes from attributes and `config/routes` |
 | containers | the Docker Engine API over its socket, through curl, from the suite's own process: no Docker CLI | |
@@ -144,6 +145,36 @@ never leaves.
 
 **A timeout, not a hold.** See above.
 
+**A gate for Redis.** A Redis client is built at the boot and keeps its connection:
+the Laravel manager's, Symfony's cache pools, Messenger's transport and a client the
+service built by hand each hold their own, and there is no one place a fault could be
+set in them. So the service is given the address of a gate, which forwards to the
+server, and a fault closes the gate: what is connected is cut, what connects is
+refused, whichever client it is and whenever it was built. PHP runs one request at a
+time, so the gate cannot be a thread of the suite's process; it is a process of the
+run's own, as the proxy is, and the suite commands it over its stdin — no signals,
+which need `pcntl`, and no second port. It ends with the suite: a closed stdin ends
+it. The fault waits for the boot, as the database's does, so the service boots with
+its Redis up and loses it after.
+
+**Refusals in the database, not in the driver.** A table's writes are refused by
+triggers in Postgres itself, so they hold for every connection — the case's own, the
+service's, a worker's — whatever client library it uses. They are gorib's `sqltest`
+ported: a schema of their own, outside what discovery and the baseline read, dropped
+whole by `heal` and by the reset before every case. Only `heal` differs by framework:
+Laravel points the connection's URL back and purges it, Symfony clears the DBAL
+middleware's fault.
+
+**Replies by template.** A reply, a time-out and a read of the requests name a path
+as the neighbour's contract does: a segment in braces takes any one segment. The
+exact path wins over a template, and of two templates the first declared does, as in
+specrig-js. The contract check and the trace name a request by its real path.
+
+**`.feature` files in their own language.** The whole-run check counts the scenarios
+in `tests/features/` by the keywords of each file's `# language:` directive, from
+behat/gherkin's own dialects, so a file in Russian is counted and `tests/flows.yaml`
+is written.
+
 **php-amqplib first.** It is the client a PHP service uses to speak JSON over
 RabbitMQ with services in other languages, and what most Laravel and Symfony
 RabbitMQ packages are built on. Symfony Messenger's AMQP transport needs the
@@ -175,4 +206,4 @@ kept, and `deliver()` calls its callback with a message whose `ack`, `nack` and
 | 0 | the records and the fixtures | built |
 | 1 | boot, settings, HTTP stand-ins and the contract check, the Behat binding, Postgres, logs, the clock; HTTP, jobs and commands as ways in; `tests/flows.yaml` | built |
 | 2 | `tests/surface.yaml` and `tests/checks.yaml`, `init`, `rules`, `specrig.md` | built |
-| 3 | the bus, `work()`, Redis, grants, `failWith` | built |
+| 3 | the bus, `work()`, Redis and its gate, grants, `failWith`, the refusals and `heal` | built |

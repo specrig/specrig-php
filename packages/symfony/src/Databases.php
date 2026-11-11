@@ -45,6 +45,11 @@ final class Databases implements Seam
         $this->harness->faulted($address, null, $error);
     }
 
+    public function heal(string $address, string $refusing): void
+    {
+        $this->harness->healed($address);
+    }
+
     private function close(): void
     {
         $doctrine = $this->harness->get('doctrine');

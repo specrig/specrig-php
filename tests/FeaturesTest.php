@@ -62,6 +62,44 @@ final class FeaturesTest extends TestCase
         $this->assertSame([['Skipped', true], ['Run', false]], array_map(fn (Scenario $c) => [$c->title, $c->ignored], $features->cases()));
     }
 
+    public function testAFileIsReadInTheLanguageItsDirectiveNames(): void
+    {
+        $features = $this->write('a.feature', <<<'GHERKIN'
+            # language: ru
+            @ignore
+            Функционал: Оплата
+
+              Сценарий: Покупатель платит
+                Когда покупатель платит
+
+              Структура сценария: Покупатель платит в <валюта>
+                Когда покупатель платит в <валюта>
+
+                Примеры:
+                  | валюта |
+                  | EUR    |
+                  | USD    |
+            GHERKIN);
+
+        $this->assertSame(
+            [['Оплата', 'Покупатель платит', true], ['Оплата', 'Покупатель платит в EUR', true], ['Оплата', 'Покупатель платит в USD', true]],
+            array_map(fn (Scenario $c) => [$c->feature, $c->title, $c->ignored], $features->cases()),
+        );
+    }
+
+    public function testAnUnknownLanguageIsReadAsEnglish(): void
+    {
+        $features = $this->write('a.feature', <<<'GHERKIN'
+            # language: xx
+            Feature: A
+
+              Scenario: Paying
+                When it runs
+            GHERKIN);
+
+        $this->assertSame(['Paying'], array_map(fn (Scenario $c) => $c->title, $features->cases()));
+    }
+
     public function testAnOutlineIsACaseForEachRowOfItsExamples(): void
     {
         $features = $this->write('a.feature', <<<'GHERKIN'

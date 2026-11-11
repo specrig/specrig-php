@@ -71,7 +71,7 @@ text of `specrig.md` — is the
 
 | package | what it is |
 |---|---|
-| `specrig/specrig` | the core, independent of the framework: the records, the contract check, the stand-ins, the proxy, the Postgres and Redis resources, the RabbitMQ stand-in, the Behat extension, the surface pass, and `vendor/bin/specrig` — `init`, `surface`, `agents`, and `rules` of the protocol's rules/1 |
+| `specrig/specrig` | the core, independent of the framework: the records, the contract check, the stand-ins, the proxy, the gate, the Postgres and Redis resources, the RabbitMQ stand-in, the Behat extension, the surface pass, and `vendor/bin/specrig` — `init`, `surface`, `agents`, and `rules` of the protocol's rules/1 |
 | `specrig/laravel` | the harness for Laravel 12 and 13 |
 | `specrig/symfony` | the harness for Symfony 7.4 and 8 |
 
@@ -253,10 +253,18 @@ with a message, and Behat is not it.
 
 | | |
 |---|---|
-| `$harness-><backend>->reply($method, $path, $status, $body)` | what the neighbour answers |
-| `$harness-><backend>->replyTo($method, $path, $query, $status, $body)` | the same, for a request whose query has these values; the reply naming the most of them wins |
+| `$harness-><backend>->reply($method, $path, $status, $body, $headers)` | what the neighbour answers, with these headers added to the response |
+| `$harness-><backend>->replyTo($method, $path, $query, $status, $body, $headers)` | the same, for a request whose query has these values; the reply naming the most of them wins |
 | `$harness-><backend>->timeOut($method, $path, $query?)` | the neighbour does not answer in time: the client meets the timeout it would meet, at once |
 | `$harness-><backend>->requests($method, $path)` | what reached the neighbour, with query and body |
+
+A path in all four may have a segment in braces, `/orders/{id}`, which takes any one
+segment. The exact path wins over a template; of two templates the first declared
+wins. `requests` returns the requests whose path the template takes, and the
+contract check and the records name a request by its real path.
+
+| | |
+|---|---|
 | `$harness->http()` | a client of the service's own HTTP kernel: `get`, `post`, `put`, `patch`, `delete`, `send`; a response with `status`, `body`, `json()` |
 | `$harness->run($job)` | a job by its class or an instance — see below |
 | `$harness->work()` | what the service queued, run as its worker runs it, until nothing is left; returns each job and how it ended |
@@ -269,6 +277,8 @@ with a message, and Behat is not it.
 | `$harness->logs()` | what the service logged, under its real logger |
 | `$harness->clock` | the service's clock: the wall clock until a step calls `set()`, then `advance()` |
 | `$harness-><resource>->failWith($error?)` | the resource refuses the service — see Postgres and Redis |
+| `$harness->database->refuse($table, ...$writes)` | Postgres refuses that table's writes: `refuseAfter($table, $rows, ...)`, `refuseCommit($table, ...)` — see Postgres |
+| `$harness->database->heal()` | the database comes back, with the rows it held |
 | `$harness->bus->failWith($error?)` | publishing throws what a closed connection throws, or the error given, until the next case |
 
 The service boots at the first step that reaches it, so a `Given` declares and
@@ -445,6 +455,18 @@ service meets the driver's own exception. An error given instead fails every
 statement with it. A fault a step sets before the boot waits for it, so the
 migration goes through; the next case boots whole.
 
+`$harness->database->refuse('orders')` makes Postgres itself refuse every insert,
+update and delete on that table, for every connection, the case's own included;
+reads keep working, and the exception says `specrig: insert on orders is refused`.
+Writes named — `refuse('orders', Write::Delete)`, `Specrig\Write` — are the only ones refused.
+`refuseAfter('orders', 2)` lets the first two rows through, `refuseCommit('orders')`
+lets the statements pass and fails the commit of a transaction that wrote the table.
+The triggers live in a schema of their own, `specrig_refusal`, which discovery and
+the baseline never list. `heal()` is the database coming back in the middle of a
+case: it ends `failWith()` and drops every refusal, and keeps the rows. A refusal a
+step sets before the boot waits for it too; the reset before every case drops what
+is left.
+
 ## Redis
 
 ```php
@@ -453,9 +475,11 @@ public readonly Redis $cache = new Redis('REDIS_URL'),
 
 The address is `address:`, else `<SERVICE>_TEST_REDIS`, else a container of the
 run's own — starting redis costs less than a second, so nothing is kept — removed
-when the run ends. Before every case `FLUSHDB` empties it. `failWith()` gives the
-service an address where nothing listens; its clients are built at the boot, so it
-is called in a `Given`, before a step reaches the service.
+when the run ends. Before every case `FLUSHDB` empties it. The service's address is
+a gate's: a process of the run's own that forwards to the server. `failWith()`
+closes it, at any moment of a case: every connection the service holds is cut and
+every new one is refused, until the next case. A fault a step sets before the boot
+waits for it, so the service boots with its Redis up.
 
 ## The records
 
@@ -507,7 +531,8 @@ by its exception's class, a command by `exit <code>`.
 
 Every whole run rewrites it, a failing one included; a run narrowed by a path,
 `--name` or `--tags` writes nothing, which the harness tells by the scenarios
-that ran against the scenarios in `tests/features/`. Only the `description` fields
+that ran against the scenarios in `tests/features/`, read in the language of each
+file's `# language:` directive, English by default. Only the `description` fields
 are written by hand: they survive a rewrite, and one whose step is gone moves to
 `orphaned`, comes back with its step, and fails the run meanwhile.
 
@@ -597,7 +622,6 @@ once.
   headers exchange throws, naming itself.
 - `Postgres` and `Redis` are the resources there are; a MySQL one is the same
   shape, not built.
-- A Redis fault is set before the boot.
 - Behat runs from the service's directory: `vendor/bin/behat -c tests/behat.php`.
 - `tests/surface.yaml` reads what the table above names: a request through a
   library it does not, an SDK say, is not in it.
@@ -615,7 +639,7 @@ make test
 The first rewrites the two samples' `tests/surface.yaml`, `tests/checks.yaml` and
 `specrig.md` through the tool. The second installs every package with the local Composer and
 runs the tests with the local PHP, 8.4 or later: the core's own in `tests/` — the
-records, the contract check, the stand-ins, the proxy, the protocol's record and
+records, the contract check, the stand-ins, the proxy, the Postgres and Redis resources, the protocol's record and
 agents fixtures, `rules`, `surface` and `init` over the apps in `tests/fixtures/laravel` and
 `tests/fixtures/symfony` —, each harness's own against its sample, then the suites
 of the two samples in `samples/`, which rewrite their `tests/flows.yaml`. The
