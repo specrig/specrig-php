@@ -255,10 +255,12 @@ with a message, and Behat is not it.
 |---|---|
 | `$harness-><backend>->reply($method, $path, $status, $body, $headers)` | what the neighbour answers, with these headers added to the response |
 | `$harness-><backend>->replyTo($method, $path, $query, $status, $body, $headers)` | the same, for a request whose query has these values; the reply naming the most of them wins |
-| `$harness-><backend>->timeOut($method, $path, $query?)` | the neighbour does not answer in time: the client meets the timeout it would meet, at once |
+| `$harness-><backend>->replyWith($method, $path, $answer, $headers)` | the answer worked out from each request: `$answer` takes the `Received` and gives `[$status, $body]`; a reply naming no query, checked as the others |
+| `$harness-><backend>->timeOut($method, $path, $query?)` | the neighbour does not answer in time: the client meets the timeout it would meet, at once; no reply lifts it |
+| `$harness-><backend>->heal()` | the neighbour answers again: every `timeOut` is lifted, the replies stay |
 | `$harness-><backend>->requests($method, $path)` | what reached the neighbour, with query and body |
 
-A path in all four may have a segment in braces, `/orders/{id}`, which takes any one
+A path any of them names may have a segment in braces, `/orders/{id}`, which takes any one
 segment. The exact path wins over a template; of two templates the first declared
 wins. `requests` returns the requests whose path the template takes, and the
 contract check and the records name a request by its real path.

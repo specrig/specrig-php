@@ -183,6 +183,66 @@ final class BackendTest extends TestCase
         $this->assertCount(2, $this->trace->records());
     }
 
+    public function testHealLiftsEveryTimeOutAndKeepsTheReplies(): void
+    {
+        $this->shop->reply('GET', '/items/2', 200, ['id' => '2']);
+        $this->shop->timeOut('GET', '/items/1');
+        $this->shop->timeOut('GET', '/items/2', ['view' => 'full']);
+        $this->shop->reply('GET', '/items/1', 200, ['id' => '1']);
+
+        try {
+            $this->get('https://shop.test/items/1');
+            $this->fail('a reply lifted the time-out');
+        } catch (Unreachable) {
+        }
+        $this->shop->heal();
+
+        $this->assertSame('1', $this->get('https://shop.test/items/1')['id']);
+        $this->assertSame('2', $this->get('https://shop.test/items/2?view=full')['id']);
+    }
+
+    public function testAnAnswerIsWorkedOutFromEachRequest(): void
+    {
+        $this->shop->replyWith('GET', '/items/{id}', fn ($r) => [200, ['id' => basename($r->path)]], ['X-Shard' => 'own']);
+
+        foreach (['1', '2'] as $id) {
+            $answer = $this->standIns->send(new Request('GET', "https://shop.test/items/{$id}"));
+            $this->assertSame([200, $id, 'own'], [$answer->status, $answer->json()['id'], $answer->header('X-Shard')]);
+        }
+        $this->assertSame([], $this->shop->violations());
+    }
+
+    public function testAnAnswerMayChangeWithWhatReachedTheNeighbour(): void
+    {
+        $this->shop->replyWith('GET', '/items/1', fn () => count($this->shop->requests('GET', '/items/1')) === 1
+            ? [404, ['code' => 7, 'message' => 'not yet']]
+            : [200, ['id' => '1']]);
+
+        $this->assertSame(404, $this->standIns->send(new Request('GET', 'https://shop.test/items/1'))->status);
+        $this->assertSame(200, $this->standIns->send(new Request('GET', 'https://shop.test/items/1'))->status);
+        $this->assertSame([], $this->shop->violations());
+    }
+
+    public function testAnAnswerWorkedOutIsAReplyNamingNoQuery(): void
+    {
+        $this->shop->replyWith('GET', '/items/1', fn () => [200, ['id' => 'worked out']]);
+        $this->shop->replyTo('GET', '/items/1', ['view' => 'full'], 200, ['id' => 'full']);
+
+        $this->assertSame('worked out', $this->get('https://shop.test/items/1?view=short')['id']);
+        $this->assertSame('full', $this->get('https://shop.test/items/1?view=full')['id']);
+        $this->shop->reply('GET', '/items/1', 200, ['id' => 'declared']);
+        $this->assertSame('declared', $this->get('https://shop.test/items/1')['id']);
+    }
+
+    public function testTheContractChecksAnAnswerWorkedOut(): void
+    {
+        $this->shop->replyWith('GET', '/items/{id}', fn () => [200, ['id' => 7]]);
+
+        $this->get('https://shop.test/items/7');
+
+        $this->assertStringStartsWith('GET /items/7 answered 200: ', $this->shop->violations()[0] ?? '');
+    }
+
     public function testWhatTheContractDoesNotAllowIsKept(): void
     {
         $this->shop->reply('POST', '/items/new', 204);
