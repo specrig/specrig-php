@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Specrig\Symfony;
 
 use Specrig\Databases as Seam;
-use Specrig\Postgres\Address;
+use Specrig\Sql\Address;
 
 final class Databases implements Seam
 {

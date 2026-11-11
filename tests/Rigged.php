@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Specrig\Tests;
 
+use Specrig\Database;
 use Specrig\Databases;
 use Specrig\Http\Client;
-use Specrig\Postgres;
 use Specrig\Redis;
 use Specrig\Rig;
 
 final class Rigged extends Rig
 {
     public function __construct(
-        public readonly ?Postgres $database = null,
+        public readonly ?Database $database = null,
         public readonly ?Redis $cache = null,
         private readonly ?Databases $seam = null,
     ) {

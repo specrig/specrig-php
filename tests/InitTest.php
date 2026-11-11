@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Specrig\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Specrig\Tool\Agents;
 use Specrig\Tool\Cli;
@@ -156,6 +157,64 @@ final class InitTest extends TestCase
     {
         $this->expectExceptionMessage('name the neighbour with --backend <name>[=<setting>]');
         Init::run([$this->copy('laravel')], '/');
+    }
+
+    /** @return iterable<string, array{string, string, string, string}> */
+    public static function databases(): iterable
+    {
+        yield 'laravel on mysql' => ['laravel', "DB_CONNECTION=mysql\nCACHE_STORE=redis\n", "new Mysql('DB_URL')", ' pdo_mysql '];
+        yield 'laravel on sqlite' => ['laravel', "DB_CONNECTION=sqlite\nCACHE_STORE=redis\n", "new Sqlite('DB_URL')", ''];
+        yield 'symfony on mysql' => ['symfony', "APP_SECRET=s3cr3t\nDATABASE_URL=\"mysql://stock:stock@127.0.0.1:3306/stock?serverVersion=8.4\"\n", "new Mysql('DATABASE_URL')", ' pdo_mysql '];
+        yield 'symfony on sqlite' => ['symfony', "APP_SECRET=s3cr3t\nDATABASE_URL=\"sqlite:///%kernel.project_dir%/var/data.db\"\n", "new Sqlite('DATABASE_URL')", ''];
+    }
+
+    #[DataProvider('databases')]
+    public function testInitGivesTheServiceTheDatabaseItsSettingsName(string $framework, string $env, string $resource, string $extension): void
+    {
+        $dir = $this->copy($framework);
+        file_put_contents("{$dir}/" . ($framework === 'laravel' ? '.env.example' : '.env'), $env);
+
+        Init::run([$dir, '--backend', $framework === 'laravel' ? 'crm=CRM_URL' : 'warehouse=WAREHOUSE_URL'], '/');
+
+        $harness = (string) file_get_contents("{$dir}/tests/internal/Harness.php");
+        $this->assertStringContainsString($resource, $harness);
+        $this->assertStringNotContainsString('Postgres', $harness);
+        $dockerfile = (string) file_get_contents("{$dir}/tests/internal/Dockerfile");
+        $this->assertStringNotContainsString('pdo_pgsql', $dockerfile);
+        $this->assertStringNotContainsString('pdo_sqlite', $dockerfile);
+        if ($extension !== '') {
+            $this->assertStringContainsString($extension, $dockerfile);
+        }
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function mariadb(): iterable
+    {
+        yield 'laravel' => ['laravel', "DB_CONNECTION=mariadb\nCACHE_STORE=redis\n"];
+        yield 'symfony' => ['symfony', "APP_SECRET=s3cr3t\nDATABASE_URL=\"mysql://stock:stock@127.0.0.1:3306/stock?serverVersion=10.11.2-MariaDB\"\n"];
+    }
+
+    #[DataProvider('mariadb')]
+    public function testInitGivesAServiceOnMariadbNoDatabase(string $framework, string $env): void
+    {
+        $dir = $this->copy($framework);
+        file_put_contents("{$dir}/" . ($framework === 'laravel' ? '.env.example' : '.env'), $env);
+
+        Init::run([$dir, '--backend', $framework === 'laravel' ? 'crm=CRM_URL' : 'warehouse=WAREHOUSE_URL'], '/');
+
+        $harness = (string) file_get_contents("{$dir}/tests/internal/Harness.php");
+        $this->assertStringNotContainsString('Mysql', $harness);
+        $this->assertStringNotContainsString('pdo_mysql', (string) file_get_contents("{$dir}/tests/internal/Dockerfile"));
+    }
+
+    public function testALaravelServiceIsAnsweredWithTheConnectionItsDatabaseIsOn(): void
+    {
+        $dir = $this->copy('laravel');
+        file_put_contents("{$dir}/.env.example", "DB_CONNECTION=sqlite\n");
+
+        Init::run([$dir, '--backend', 'crm=CRM_URL'], '/');
+
+        $this->assertStringContainsString("'DB_CONNECTION' => 'sqlite'", (string) file_get_contents("{$dir}/tests/internal/Harness.php"));
     }
 
     public function testASymfonySettingNothingAnswersIsAnsweredEmpty(): void

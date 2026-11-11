@@ -50,8 +50,8 @@ everything the request made it do. Three things follow.
 | clock | `Carbon::setTestNow`, from the step that sets it | the `clock` service and `Clock::set`, and Carbon's where it is installed |
 | logs | `MessageLogged` | the `logger` service decorated |
 | grants | `replace(Type::class, $instance)`: `instance()` after the providers register | `replace(Type::class, $instance)`: every granted service decorated by one that hands out the replacement |
-| Postgres | `migrate --force` once per run; every table but `migrations` and `keep()` put back before every case as the migrations left it; a refusal by the connection's URL pointed at a closed port and the connection purged; another error by `beforeExecuting`; `heal` points the URL back and purges | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` put back before every case as the migrations left it; a DBAL middleware refuses connecting, or fails every statement with the step's error; `heal` clears the middleware's fault |
-| a table's writes | triggers in Postgres itself, in a schema of their own, put there by `refuse`, `refuseAfter` and `refuseCommit`; dropped by `heal` and before every case | the same |
+| Postgres, MySQL, SQLite | `migrate --force` once per run; every table but `migrations` and `keep()` put back before every case as the migrations left it; a refusal by the connection's URL pointed where no database is — a closed port, a directory — and the connection purged; another error by `beforeExecuting`; `heal` points the URL back and purges | `doctrine:migrations:migrate` once per run, else the schema created; every table but `doctrine_migration_versions` and `keep()` put back before every case as the migrations left it; a DBAL middleware matches a connection by host, port and database, or by its file, and refuses connecting, or fails every statement with the step's error; `heal` clears the middleware's fault |
+| a table's writes | triggers in the database itself, put there by `refuse`, `refuseAfter` and, on Postgres, `refuseCommit`; dropped by `heal` and before every case | the same |
 | Redis | the address the service gets is a gate's, a process of the run's own that forwards; `failWith` closes it; `FLUSHDB` before every case | the same |
 | steps | Behat: an extension hands every context the case's harness, marks Given, When and Then, fails a case on what the harness found, and writes `tests/flows.yaml` after a whole run | |
 | `tests/surface.yaml` | `nikic/php-parser` over `app/`, `routes/`, `config/` and `bootstrap/` | the same over `src/` and `config/`, routes from attributes and `config/routes` |
@@ -119,7 +119,37 @@ migrations write — the states an order moves through, the root of a tree — e
 in no environment; a step that writes them again is a second copy of the
 migration that drifts from the first, and a `keep()` for them carries one case's
 changes into the next. Writing them back turns foreign keys and triggers off for
-one transaction, which takes a superuser; migrations that write no rows need none.
+one transaction, which takes a superuser on Postgres; migrations that write no rows
+need none. MySQL and SQLite cannot turn a trigger off, so the triggers that would
+fire are dropped and made again around it.
+
+**One core, three dialects.** `Database` is the resource every dialect shares — the
+fault and the refusals a step sets before the boot, `heal`, `release` — and
+`Sql\Engine` the loop under it: migrate once, remember what the migrations left, lift
+the refusals and restore before every case. `Sql\Server` is the half Postgres and
+MySQL share: the address given or a container kept between runs, a database of the
+run's own, the sweep of what a killed run left. Each dialect holds only its SQL, and
+a method only where the database can keep it: `refuseCommit` is `Postgres`'s alone,
+not one that throws on the others.
+
+**MySQL puts back only what changed.** Truncating a table, dropping a trigger and
+setting `AUTO_INCREMENT` are DDL in MySQL. Measured on MySQL 8.4 in Docker on a Mac:
+`TRUNCATE` 45 ms a table against 0.2 ms for `DELETE`, `ALTER TABLE … AUTO_INCREMENT`
+7 ms, `DROP TRIGGER` 5 ms and `CREATE TRIGGER` 3 ms. So one `CHECKSUM TABLE` names the
+tables a case changed, only they are emptied with `DELETE` and written back, only the
+triggers that would fire on that are made again, and a counter is set back only where
+it moved: a reset is 2.5 ms when no case wrote, about 12 ms after two inserts or a
+changed seeded table with a trigger. Postgres's is about 5.5 ms, SQLite's under 1 ms.
+The reset runs on a connection of its own, 0.7 ms to open, so `foreign_key_checks`,
+`NO_AUTO_VALUE_ON_ZERO` and a trigger's `sql_mode` stay with it. A trigger is dropped
+outside the refill's transaction, since DDL commits, so every reset also makes again
+a trigger of the migrations' that is missing: one a failed reset dropped would
+otherwise be gone for the rest of the run, its table matching its checksum.
+
+**Where a refused connection goes.** A closed port for a server; for SQLite, the
+run's directory, which SQLite cannot open, so the service meets `unable to open
+database file` as for a file that is gone. Laravel and Doctrine raise their own
+exceptions for both, as they would in production.
 
 **A container of the run's own.** A Symfony container compiled without debug
 never checks its sources, so one kept between runs would serve yesterday's code.
@@ -158,12 +188,27 @@ it. The fault waits for the boot, as the database's does, so the service boots w
 its Redis up and loses it after.
 
 **Refusals in the database, not in the driver.** A table's writes are refused by
-triggers in Postgres itself, so they hold for every connection — the case's own, the
-service's, a worker's — whatever client library it uses. They are gorib's `sqltest`
-ported: a schema of their own, outside what discovery and the baseline read, dropped
-whole by `heal` and by the reset before every case. Only `heal` differs by framework:
-Laravel points the connection's URL back and purges it, Symfony clears the DBAL
-middleware's fault.
+triggers in the database itself, so they hold for every connection — the case's own,
+the service's, a worker's — whatever client library it uses. They are gorib's
+`sqltest` ported: on Postgres a schema of their own, on MySQL and SQLite `specrig_`
+triggers and a `specrig_refusal` quota table, outside what discovery and the baseline
+read, dropped by `heal` and by the reset before every case. A MySQL trigger's name is
+a hash: a table's name may take all 64 characters a trigger's may. Only `heal`
+differs by framework: Laravel points the connection's URL back and purges it,
+Symfony clears the DBAL middleware's fault.
+
+**No `refuseCommit` on MySQL or SQLite.** MySQL has no deferred constraint, so
+nothing fails at a commit. In SQLite only a deferred foreign key does, and the driver
+reports it as a broken foreign key, so a case would test that branch instead of a
+commit that failed.
+
+**Loopback.** A container specrig starts publishes its port on 127.0.0.1 when the
+suite runs on the host: the servers take anyone in without a password. In a container
+the suite reaches the host by another address, so there the port is published on
+every interface. The `specrig.published` label and the container's name say which,
+and a kept container is reused only by a run that would publish it the same way:
+otherwise a run in a container waits a minute on a port it cannot reach, or a run on
+the host keeps serving an open server to the network.
 
 **Replies by template.** A reply, a time-out and a read of the requests name a path
 as the neighbour's contract does: a segment in braces takes any one segment. The
@@ -194,8 +239,9 @@ kept, and `deliver()` calls its callback with a message whose `ack`, `nack` and
 2. **Behat.** 3.34 and up, and 4.
 3. **gRPC.** Neither way: a PHP service serves gRPC only under RoadRunner, and a
    client stand-in under the `grpc` extension is not built.
-4. **MySQL.** Postgres and Redis are the resources there are; a MySQL resource is
-   the same shape.
+4. **Databases.** Postgres, MySQL 8 and SQLite. MariaDB is not tried: the MySQL
+   reset reads `information_schema_stats_expiry`, which it does not have, so `init`
+   gives a service on MariaDB no database.
 5. **Enforcement in Claude Code.** As in .NET: `rules` prints the service's rules,
    and the plugin checks every edit against them.
 
@@ -207,3 +253,4 @@ kept, and `deliver()` calls its callback with a message whose `ack`, `nack` and
 | 1 | boot, settings, HTTP stand-ins and the contract check, the Behat binding, Postgres, logs, the clock; HTTP, jobs and commands as ways in; `tests/flows.yaml` | built |
 | 2 | `tests/surface.yaml` and `tests/checks.yaml`, `init`, `rules`, `specrig.md` | built |
 | 3 | the bus, `work()`, Redis and its gate, grants, `failWith`, the refusals and `heal` | built |
+| 4 | MySQL and SQLite, on the core Postgres now shares with them | built |

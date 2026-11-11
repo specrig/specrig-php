@@ -12,8 +12,8 @@ use Specrig\Http\Inbound;
 use Specrig\Http\Request;
 use Specrig\Http\Response;
 use Specrig\Logged;
-use Specrig\Postgres\Address;
 use Specrig\Rig;
+use Specrig\Sql\Address;
 use Specrig\Worked;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Component\Clock\Clock as GlobalClock;
@@ -202,8 +202,8 @@ abstract class Harness extends Rig
     public function fault(array $params): array
     {
         foreach ($this->faults as $address => $fault) {
-            $at = Address::parse($address);
-            if (($params['host'] ?? null) === $at->host && (int) ($params['port'] ?? 5432) === $at->port && ($params['dbname'] ?? null) === $at->database) {
+            $at = self::connected(Address::parse($address));
+            if (array_filter($at, fn (string|int $value, string $key) => (string) ($params[$key] ?? '') !== (string) $value, ARRAY_FILTER_USE_BOTH) === []) {
                 return $fault;
             }
         }
@@ -351,6 +351,12 @@ abstract class Harness extends Rig
         $root = static::root();
         $base = is_file("{$root}/.env") ? "{$root}/.env" : (is_file("{$root}/.env.dist") ? "{$root}/.env.dist" : null);
         return array_values(array_filter([$base, is_file("{$root}/.env.prod") ? "{$root}/.env.prod" : null]));
+    }
+
+    /** @return array<string, string|int> the parameters Doctrine connects by */
+    private static function connected(Address $at): array
+    {
+        return $at->scheme === 'sqlite' ? ['path' => $at->database] : ['host' => $at->host, 'port' => $at->port, 'dbname' => $at->database];
     }
 
     private static function directory(): string

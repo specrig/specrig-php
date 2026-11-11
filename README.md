@@ -71,7 +71,7 @@ text of `specrig.md` — is the
 
 | package | what it is |
 |---|---|
-| `specrig/specrig` | the core, independent of the framework: the records, the contract check, the stand-ins, the proxy, the gate, the Postgres and Redis resources, the RabbitMQ stand-in, the Behat extension, the surface pass, and `vendor/bin/specrig` — `init`, `surface`, `agents`, and `rules` of the protocol's rules/1 |
+| `specrig/specrig` | the core, independent of the framework: the records, the contract check, the stand-ins, the proxy, the gate, the Postgres, MySQL, SQLite and Redis resources, the RabbitMQ stand-in, the Behat extension, the surface pass, and `vendor/bin/specrig` — `init`, `surface`, `agents`, and `rules` of the protocol's rules/1 |
 | `specrig/laravel` | the harness for Laravel 12 and 13 |
 | `specrig/symfony` | the harness for Symfony 7.4 and 8 |
 
@@ -96,13 +96,15 @@ vendor/bin/specrig init --backend billing=BILLING_URL --contract billing=../docs
 packages it uses. `--backend` names a neighbour the service calls over HTTP and
 the variable that holds its address; a variable the code does not read is
 refused, with the list of those it does, and a service that calls out with no
-`--backend` is refused, naming the calls. Postgres becomes a `Postgres` resource
-— Laravel's `DB_CONNECTION=pgsql` in `.env.example`, Symfony's `postgres://`
-`DATABASE_URL` in `.env` —, Redis a `Redis` where Laravel's `.env.example` puts a
+`--backend` is refused, naming the calls. The database becomes a resource of its
+kind — Laravel's `DB_CONNECTION` in `.env.example`, `pgsql`, `mysql` or `sqlite`,
+Symfony's `DATABASE_URL` in `.env`, `postgres…://`, `mysql://` or `sqlite://`:
+a `Postgres`, a `Mysql` or a `Sqlite` —; MariaDB, Laravel's `mariadb` or a Symfony
+`serverVersion` that names it, gets none, since it is not tried. Redis becomes a `Redis` where Laravel's `.env.example` puts a
 store, the queue or the session on it or Symfony reads `REDIS_URL`, and
 php-amqplib a `Bus` on the variable that names RabbitMQ or AMQP; the console
 commands that bind a queue go into `running()`. Laravel gets an `APP_KEY` of its
-own; a Symfony setting the code needs and `.env` does not ship becomes a constant
+own and the `DB_CONNECTION` its database is on; a Symfony setting the code needs and `.env` does not ship becomes a constant
 the harness answers empty.
 
 | option | |
@@ -155,7 +157,8 @@ is the project's. The `agents` command fails while `AGENTS.md` does not bring
 
 They run on the PHP and Composer the service is developed with, so an IDE runs and
 debugs the same suite. That PHP needs what the service needs, and `pdo_pgsql` for
-a `Postgres`, `sockets` for php-amqplib. The resources start in Docker from the
+a `Postgres`, `pdo_mysql` for a `Mysql`, `pdo_sqlite` for a `Sqlite`, `sockets` for
+php-amqplib. The resources start in Docker from the
 suite's own process, through the Docker socket: `DOCKER_HOST`, else where Docker
 Desktop, OrbStack, Colima or Rancher Desktop put it.
 
@@ -278,8 +281,8 @@ contract check and the records name a request by its real path.
 | `$harness->replace($type, $instance)` | a granted service of the container, replaced before the service boots |
 | `$harness->logs()` | what the service logged, under its real logger |
 | `$harness->clock` | the service's clock: the wall clock until a step calls `set()`, then `advance()` |
-| `$harness-><resource>->failWith($error?)` | the resource refuses the service — see Postgres and Redis |
-| `$harness->database->refuse($table, ...$writes)` | Postgres refuses that table's writes: `refuseAfter($table, $rows, ...)`, `refuseCommit($table, ...)` — see Postgres |
+| `$harness-><resource>->failWith($error?)` | the resource refuses the service — see Postgres, MySQL, SQLite and Redis |
+| `$harness->database->refuse($table, ...$writes)` | the database refuses that table's writes: `refuseAfter($table, $rows, ...)`, and on Postgres `refuseCommit($table, ...)` — see Postgres |
 | `$harness->database->heal()` | the database comes back, with the rows it held |
 | `$harness->bus->failWith($error?)` | publishing throws what a closed connection throws, or the error given, until the next case |
 
@@ -287,7 +290,7 @@ The service boots at the first step that reaches it, so a `Given` declares and
 replaces before anything is built. Each case boots a service of its own: a
 singleton holding state does not carry it into the next case, and the static
 state Laravel's own `TestCase` flushes is flushed too. The resources are
-provisioned once per run and put back before every case: Postgres to what the
+provisioned once per run and put back before every case: a database to what the
 migrations left, Redis empty.
 
 A call no step answered gets a 501 and fails the case, named. After the case,
@@ -346,7 +349,7 @@ A Laravel service's extends `\Specrig\Laravel\Harness`; the rest is the same.
 | member | |
 |---|---|
 | a `Backend` | an HTTP neighbour: its origin, the variable that points the service at it, its OpenAPI document, the schema of its 5xx |
-| a `Postgres` or `Redis` | a real system, and the variable that receives its address |
+| a `Postgres`, `Mysql`, `Sqlite` or `Redis` | a real system, and the variable that receives its address |
 | a `Bus` | RabbitMQ, stood in for in process in place of the php-amqplib connection the container holds, and the variable that holds its address, answered with one that leads nowhere |
 | `constants()` | the other variables the harness answers, as given |
 | `allow()` | the services of the container a case may replace |
@@ -433,6 +436,12 @@ The variable receives one URL — Laravel's `DB_URL`, Symfony's `DATABASE_URL` �
 with Doctrine's `serverVersion` in it. The address is `address:` if given, else
 `<SERVICE>_TEST_POSTGRES`, else a container started through the Docker socket and
 kept between runs — starting postgres costs seconds, a database a fraction of one.
+It takes anyone in without a password, so a run on the host publishes it on
+loopback alone, and a run in a container, `TESTCONTAINERS_HOST_OVERRIDE` set, on
+every interface. A container is kept for each: its `specrig.published` label and its
+name, `specrig-postgres-postgres-17-alpine-loopback` or `…-everywhere`, say which, and
+one published the other way is never reused. A container an earlier specrig started,
+without the label, is not reused either and stays until it is removed.
 The database is the run's own: `shop_test_<pid>`, created at the first boot and
 dropped when the run ends. A run killed before its end leaves its database behind,
 and the next run drops it: a name of that shape, marked by specrig over an hour
@@ -468,6 +477,68 @@ the baseline never list. `heal()` is the database coming back in the middle of a
 case: it ends `failWith()` and drops every refusal, and keeps the rows. A refusal a
 step sets before the boot waits for it too; the reset before every case drops what
 is left.
+
+## MySQL
+
+```php
+public readonly Mysql $database = new Mysql('DATABASE_URL'),
+```
+
+What Postgres does, on MySQL 8: one URL in the variable, `mysql://` with Doctrine's
+`serverVersion` and `charset=utf8mb4`; `address:`, else `<SERVICE>_TEST_MYSQL`, else a
+`mysql:8.4` container kept between runs, root without a password, published on
+loopback; a database of the run's own, `shop_test_<pid>`, swept the same way. MySQL
+keeps no comment on a database, so specrig's mark is the comment of a `specrig_mark`
+table in it, and a database is dropped after the connections to it are killed: a
+transaction left open would hold the drop for good. `Mysql` sets the URL alone: a
+Laravel service's `DB_CONNECTION` is the harness's `constants()`, where `init` writes
+`mysql`.
+
+The reset puts back only what a case changed, because in MySQL truncating a table,
+dropping a trigger and setting a counter are DDL, tens of milliseconds each. The rows
+the migrations wrote are copied into `specrig_kept_<n>` tables beside the service's,
+which discovery never lists. Before every case one `CHECKSUM TABLE` finds the tables
+that differ, and only those are emptied with `DELETE` and written back, in one
+transaction with foreign keys off on a connection of specrig's own, closed after,
+and with `NO_AUTO_VALUE_ON_ZERO`, so a row the migrations put at id 0 keeps it.
+A trigger that would fire on that — an
+insert trigger of a table written back, a delete trigger of a table emptied — is
+dropped first and made again after, in the `sql_mode` it was made in and in its
+order; one of the migrations' triggers found missing, say after a reset that failed
+halfway, is made again too. Where `AUTO_INCREMENT` moved, it is set back.
+
+`failWith()` points the service's connection at a closed port, as on Postgres.
+`refuse()` and `refuseAfter()` are a `BEFORE` trigger per write, which ends the
+statement with `SIGNAL SQLSTATE '45000'` and `specrig: insert on orders is refused`;
+the quota is a `specrig_refusal` table. There is no `refuseCommit()`: MySQL checks no
+constraint at the commit, so there is nothing a commit could fail on.
+
+## SQLite
+
+```php
+public readonly Sqlite $database = new Sqlite('DB_URL'),
+```
+
+The database is a file of the run's own, in a directory of its own in the system's
+temporary directory, and the variable receives `sqlite:////…/shop.db`; it is removed
+when the run ends, and a run killed before its end leaves the directory behind.
+`Sqlite` sets the URL alone: a Laravel service's `DB_CONNECTION` is the harness's
+`constants()`, where `init` writes `sqlite`. Foreign keys on the service's own
+connections are the framework's call, as in production: Laravel turns them on,
+Doctrine leaves them off. Before every case every table
+but the migrations' own and those `keep:` names is emptied and the rows the
+migrations wrote are written back, from a second file attached only to the
+connection that resets, in one transaction with foreign keys off; every trigger is
+dropped and made again around it, and the emptied tables' counters in
+`sqlite_sequence` are set back. Virtual tables (FTS5, R*Tree) and their shadow
+tables are left out, so the rows a case writes into them are not reset.
+
+`failWith()` points the service's connection at that directory, which SQLite cannot
+open: the service meets `unable to open database file`, as for a file that is gone.
+`refuse()` and `refuseAfter()` are `BEFORE` triggers that `RAISE(ABORT, …)`, with the
+quota in a `specrig_refusal` table. There is no `refuseCommit()`: only a deferred
+foreign key fails a commit here, and the driver reports it as a broken foreign key, so
+a case would test that branch instead.
 
 ## Redis
 
@@ -622,8 +693,9 @@ once.
   drive; Symfony Messenger's AMQP transport is replaced by an in-memory one like
   any async transport, and its messages are named by class, not routing key. A
   headers exchange throws, naming itself.
-- `Postgres` and `Redis` are the resources there are; a MySQL one is the same
-  shape, not built.
+- `Mysql` is MySQL 8: its reset reads `information_schema_stats_expiry`, which
+  MariaDB does not have. MariaDB is not tried, and `init` gives a service on it no
+  database.
 - Behat runs from the service's directory: `vendor/bin/behat -c tests/behat.php`.
 - `tests/surface.yaml` reads what the table above names: a request through a
   library it does not, an SDK say, is not in it.
@@ -641,18 +713,22 @@ make test
 The first rewrites the two samples' `tests/surface.yaml`, `tests/checks.yaml` and
 `specrig.md` through the tool. The second installs every package with the local Composer and
 runs the tests with the local PHP, 8.4 or later: the core's own in `tests/` — the
-records, the contract check, the stand-ins, the proxy, the Postgres and Redis resources, the protocol's record and
+records, the contract check, the stand-ins, the proxy, the Postgres, MySQL, SQLite and Redis resources, the protocol's record and
 agents fixtures, `rules`, `surface` and `init` over the apps in `tests/fixtures/laravel` and
-`tests/fixtures/symfony` —, each harness's own against its sample, then the suites
-of the two samples in `samples/`, which rewrite their `tests/flows.yaml`. The
-resources start in Docker. `make test-docker` and `make generate-docker` do the
-same in the image the shop sample builds, given the host's Docker socket.
+`tests/fixtures/symfony` —, each harness's own against its sample, on MySQL and SQLite
+as well as Postgres — the Symfony one's schema from the sample's mapping there, since
+its migration is Postgres's SQL —, then the suites of the two samples in `samples/`,
+which rewrite their `tests/flows.yaml`. The resources start in Docker. `make
+test-docker` and `make generate-docker` do the same in the image the shop sample
+builds, given the host's Docker socket.
 
 ```bash
 docker rm -f $(docker ps -aq --filter label=specrig=postgres)
 ```
 
-removes the kept Postgres container.
+removes the kept Postgres containers, and `label=specrig=mysql` the MySQL ones.
+`make test-docker` keeps containers of its own, published on every interface, beside
+those a run on the host keeps on loopback.
 
 ```bash
 make protocol

@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Specrig\Tests;
 
 use PHPUnit\Framework\TestCase;
-use Specrig\Postgres\Address;
 use Specrig\Postgres\Server;
 use Specrig\Rig;
+use Specrig\Sql\Address;
 
 final class PostgresTest extends TestCase
 {
@@ -54,6 +54,15 @@ final class PostgresTest extends TestCase
     private function column(string $query): array
     {
         return $this->database->query($query)->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
+    public function testTheAddressStillAnswersToItsOldName(): void
+    {
+        $server = $this->migrated(self::SEEDED);
+
+        $old = \Specrig\Postgres\Address::parse($server->address);
+
+        $this->assertSame(['R1'], $old->pdo()->query('select name from vendors')->fetchAll(\PDO::FETCH_COLUMN));
     }
 
     public function testAResetPutsBackTheRowsTheMigrationsLeftAndNoOthers(): void

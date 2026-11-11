@@ -6,7 +6,7 @@ namespace Specrig\Symfony;
 
 use PhpAmqpLib\Connection\AbstractConnection;
 use Psr\Log\LoggerInterface;
-use Specrig\Postgres\Address;
+use Specrig\Sql\Address;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 

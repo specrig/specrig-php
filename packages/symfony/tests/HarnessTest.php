@@ -12,15 +12,20 @@ use App\SendReminders;
 use Doctrine\DBAL\Exception\ConnectionException;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Predis\Client;
 use Predis\PredisException;
 use Specrig\Amqp\Bus;
 use Specrig\Backend;
+use Specrig\Database;
+use Specrig\Databases;
 use Specrig\Environment;
+use Specrig\Mysql;
 use Specrig\Postgres;
 use Specrig\Redis;
 use Specrig\Rig;
+use Specrig\Sqlite;
 use Specrig\Symfony\Harness;
 use Specrig\Write;
 use Symfony\Component\HttpClient\HttpClient;
@@ -33,7 +38,7 @@ final class Reminders extends Harness
 
     public function __construct(
         public readonly Backend $billing = new Backend('https://billing.reminders.test', setting: 'BILLING_URL', contract: '../docs/billing.yaml', failure: 'Error'),
-        public readonly Postgres $database = new Postgres('DATABASE_URL'),
+        public readonly Database $database = new Postgres('DATABASE_URL'),
         public readonly Redis $cache = new Redis('REDIS_URL'),
         public readonly Bus $bus = new Bus('RABBIT_URL'),
     ) {
@@ -43,6 +48,12 @@ final class Reminders extends Harness
     public static function tests(): string
     {
         return dirname(__DIR__, 3) . '/samples/reminders/tests';
+    }
+
+    // The sample's migration is Postgres's SQL; its mapping makes the schema on any database.
+    public function databases(): Databases
+    {
+        return $this->database instanceof Postgres ? parent::databases() : new Mapped(parent::databases(), $this);
     }
 
     public function service(): string
@@ -63,6 +74,41 @@ final class Reminders extends Harness
     protected function allow(): array
     {
         return [Billing::class];
+    }
+}
+
+final class Mapped implements Databases
+{
+    public function __construct(private readonly Databases $inner, private readonly Harness $harness)
+    {
+    }
+
+    public function migrate(): void
+    {
+        [$code, $output] = $this->harness->console('doctrine:schema:create');
+        if ($code !== 0) {
+            throw new \RuntimeException(trim($output));
+        }
+    }
+
+    public function bookkeeping(): array
+    {
+        return $this->inner->bookkeeping();
+    }
+
+    public function refuse(string $address, string $refusing): void
+    {
+        $this->inner->refuse($address, $refusing);
+    }
+
+    public function fail(string $address, \Throwable $error): void
+    {
+        $this->inner->fail($address, $error);
+    }
+
+    public function heal(string $address, string $refusing): void
+    {
+        $this->inner->heal($address, $refusing);
     }
 }
 
@@ -215,6 +261,18 @@ final class HarnessTest extends TestCase
         $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
     }
 
+    public function testAFaultGivenTheOldAddressPointsTheServiceAway(): void
+    {
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $address = (string) Environment::get('DATABASE_URL');
+
+        $this->reminders->faulted($address, \Specrig\Postgres\Address::parse($address)->with(host: '127.0.0.1', port: 1), null);
+        $connection->close();
+
+        $this->expectException(ConnectionException::class);
+        $connection->executeQuery('SELECT 1');
+    }
+
     public function testADatabaseThatFailedWithAnErrorComesBackToo(): void
     {
         $this->reminded(7);
@@ -234,6 +292,91 @@ final class HarnessTest extends TestCase
 
     public function testATableThatRefusesItsWritesRefusesTheServiceUntilTheDatabaseComesBack(): void
     {
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $insert = "INSERT INTO reminders (order_id, amount, sent_at) VALUES (8, 80, '2026-11-10 12:00:00')";
+        $this->reminders->database->refuse('reminders', Write::Insert);
+
+        try {
+            $connection->executeStatement($insert);
+            $this->fail('the insert went through');
+        } catch (DriverException $e) {
+            $this->assertStringContainsString('specrig: insert on reminders is refused', $e->getMessage());
+        }
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->executeStatement($insert));
+    }
+
+    /** @return iterable<string, array{\Closure(): Database}> */
+    public static function databases(): iterable
+    {
+        yield 'mysql' => [fn () => new Mysql('DATABASE_URL')];
+        yield 'sqlite' => [fn () => new Sqlite('DATABASE_URL')];
+    }
+
+    /** @param \Closure(): Database $database */
+    private function on(\Closure $database): void
+    {
+        $this->reminders->dispose();
+        $this->reminders = new Reminders(database: $database());
+    }
+
+    #[DataProvider('databases')]
+    public function testEveryCaseStartsFromAnEmptyMysqlOrSqliteDatabase(\Closure $database): void
+    {
+        $this->on($database);
+        $this->reminded(7);
+        $this->reminders->dispose();
+
+        $this->reminders = new Reminders(database: $database());
+
+        $this->assertNull($this->reminders->get(EntityManagerInterface::class)->getRepository(Reminder::class)->findOneBy(['order' => 7]));
+    }
+
+    #[DataProvider('databases')]
+    public function testAMysqlOrSqliteDatabaseThatComesBackAnswersAgainWithTheRowsItHeld(\Closure $database): void
+    {
+        $this->on($database);
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $this->reminders->database->failWith();
+        try {
+            $connection->executeQuery('SELECT 1');
+            $this->fail('the database answered');
+        } catch (ConnectionException) {
+        }
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+    }
+
+    #[DataProvider('databases')]
+    public function testAMysqlOrSqliteDatabaseThatFailedWithAnErrorComesBackToo(\Closure $database): void
+    {
+        $this->on($database);
+        $this->reminded(7);
+        $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
+        $this->reminders->database->failWith(new \RuntimeException('the disk is full'));
+        try {
+            $connection->executeQuery('SELECT 1');
+            $this->fail('the database answered');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('the disk is full', $e->getMessage());
+        }
+
+        $this->reminders->database->heal();
+
+        $this->assertSame(1, $connection->fetchOne('SELECT count(*) FROM reminders'));
+    }
+
+    #[DataProvider('databases')]
+    public function testAMysqlOrSqliteTableThatRefusesItsWritesRefusesTheServiceUntilTheDatabaseComesBack(\Closure $database): void
+    {
+        $this->on($database);
         $this->reminded(7);
         $connection = $this->reminders->get(EntityManagerInterface::class)->getConnection();
         $insert = "INSERT INTO reminders (order_id, amount, sent_at) VALUES (8, 80, '2026-11-10 12:00:00')";

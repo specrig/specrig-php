@@ -8,7 +8,7 @@ use Doctrine\DBAL\Driver\Connection;
 use Doctrine\DBAL\Driver\Middleware\AbstractDriverMiddleware;
 use Specrig\Symfony\Seams;
 
-// A database a step made refuse is connected to where nothing listens, so the
+// A database a step made refuse is connected where no database is, so the
 // driver fails as it fails against a database that is down.
 final class Faulty extends AbstractDriverMiddleware
 {
@@ -16,7 +16,7 @@ final class Faulty extends AbstractDriverMiddleware
     {
         [$refusing] = Seams::fault($params);
         if ($refusing !== null) {
-            $params = ['host' => $refusing->host, 'port' => $refusing->port] + $params;
+            $params = ($refusing->scheme === 'sqlite' ? ['path' => $refusing->database] : ['host' => $refusing->host, 'port' => $refusing->port]) + $params;
         }
         return new Failing(parent::connect($params), $params);
     }
